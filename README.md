@@ -6,7 +6,7 @@ Please note that this repository will be maintained but not regularly.
 
 ## Installation
 
-Simply download the artefact [here](https://github.com/jordan2doyle1/DSA-2023-DroidGraph/archive/877dde05c49f4ab217980ac73d5ea60e764c981e.zip) and apply the following environment configuration.
+Simply download the artefact [here](https://github.com/jordan2doyle1/Exp-2024-Padraig/archive/cbb772ec017f44db8add539e5621cb7cc151a9ad.zip) and apply the following environment configuration.
 
 ### Environment Configration
 
