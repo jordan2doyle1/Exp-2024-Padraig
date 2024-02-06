@@ -1,0 +1,96 @@
+#!/bin/bash -l
+#
+# Author: Jordan Doyle.
+#
+
+source log.sh
+source setting.sh
+source util.sh
+source dock.sh
+
+# shellcheck disable=SC2317  # Ignore unreachable commands warning.
+function update() {
+    code=$?
+
+    log_execution_time
+
+    exit $((code))
+}
+
+task="selection"
+trap update EXIT
+
+usage="Usage: $(basename "$0") [-h] [-b] -o DIR"
+while getopts ':hbo:' option; do
+    case "$option" in
+        h) 
+            info "$usage" 
+            exit
+            ;;
+        b) 
+            build=true
+            ;;
+        o)
+            output="$OPTARG"
+            ;;
+        :) 
+            error "Missing argument for -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+        ?)
+            error "Illegal option: -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ ! "$output" ]]; then
+    error "Argument -o must be provided."
+    error "$usage"
+    exit 1
+fi
+
+if [[ -z $build ]]; then
+    error "Default settings have not been provided."
+    exit 2
+fi
+
+check_docker_install
+
+check_output_exists
+output=$(readlink -f "$output")
+
+source_archive="$task/source.zip"
+if [[ -f $source_archive ]]; then
+    info "Extracting manually selected apps."
+    unzip -nq "$source_archive" -d "$output"
+    code=$?
+
+    if [[ $code -ne 0 ]]; then
+        error "Failed to extract manually selected apps (Err: $code)."
+    fi
+else
+    warn "Archive of manually selected apps does not exist."
+fi
+
+repository="selection"
+image="jordandoyle100/$repository"
+container="selection-container"
+
+log="$output/selection.log"
+[[ -f "$log" ]] && rm "$log"
+
+
+$build && docker_cleanup $image
+remove_existing_container "$container"
+docker_build $image $task
+info "Running docker container '$container' with image '$image'."
+docker run --rm -it --name "$container" -v "$output":"$docker_output" "$image"
+code=$?
+
+if [[ $code -ne 0 ]]; then
+    error "Task '$task' failed (Err: $code)."
+    exit $((code))
+fi

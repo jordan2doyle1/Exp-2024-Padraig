@@ -1,0 +1,87 @@
+#!/bin/bash
+#
+# Author: Jordan Doyle. 
+#
+
+source log.sh
+source setting.sh
+source util.sh
+
+# shellcheck disable=SC2317  # Ignore unreachable commands warning.
+function update {
+    code=$?
+    log_execution_time
+    exit $((code))
+}
+
+trap update EXIT
+
+usage="Usage: $(basename "$0") [-h] -o DIR -a FILE -t STR -s | -n INT"
+while getopts ':ho:a:t:sn:' option; do
+    case "$option" in
+        h) 
+            info "$usage" 
+            exit
+            ;;
+        o)
+            output="$OPTARG"
+            ;;
+        a)
+            apk="$OPTARG"
+            ;;
+        t)
+            task="$OPTARG"
+            ;;
+        s)
+            multiple_runs=false
+            ;;
+        n)
+            test="$OPTARG"
+            ;;
+        :) 
+            error "Missing argument for -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+        ?)
+            error "Illegal option: -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ ! "$output" ]] || [[ ! "$apk" ]] || [[ ! "$task" ]] || \
+        ($multiple_runs && [[ ! "$test" ]])
+then
+    error "Arguments -o, -a, -t and either -s or -n must be provided."
+    error "$usage"
+    exit 1
+fi
+
+check_output_exists
+output=$(readlink -f "$output")
+
+check_apk_exists
+app_name=$(basename "$apk" .apk)
+
+check_task_exists
+
+if [[ ! $results_dir_name ]] || [[ ! $task_log_name ]]; then
+    error "Default settings have not been provided."
+    exit 3
+fi
+
+results="$output/$results_dir_name/$app_name/$task"
+log="$results/$task_log_name"
+
+if $multiple_runs; then
+    results="$results/test_$test"
+    log="$results/${task_log_name/.log/_$test.log}"
+fi
+
+[[ -d $results ]] && rm -r "$results"
+mkdir -p "$results"
+
+./"$task" 2>&1 | tee "$log"
+exit "${PIPESTATUS[0]}"

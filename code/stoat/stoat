@@ -1,0 +1,110 @@
+#!/bin/bash
+#
+# Author: Jordan Doyle.
+#
+
+# shellcheck source=../log.sh
+source log.sh
+# shellcheck source=../setting.sh
+source setting.sh
+# shellcheck source=../acv.sh
+source acv.sh
+# shellcheck source=../util.sh
+source util.sh
+
+function update {
+    code=$?
+    log_execution_time
+    exit $((code))
+}
+
+trap update EXIT
+
+usage="Usage: $(basename "$0") [-h] -t INT -o DIR -a FILE"
+while getopts ':ht:o:a:' option; do
+    case "$option" in
+        h) 
+            info "$usage" 
+            exit
+            ;;
+        t)
+            test="$OPTARG"
+            ;;
+        o)
+            output="$OPTARG"
+            ;;
+        a)
+            apk="$OPTARG"
+            ;;
+        :) 
+            error "Missing argument for -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+        ?)
+            error "Illegal option: -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ ! "$output" ]] || [[ ! "$apk" ]] || [[ ! "$test" ]]; then
+    error "Arguments -o -a and -t must be provided."
+    error "$usage"
+    exit 1
+fi
+
+check_output_exists
+output=$(readlink -f "$output")
+
+check_apk_exists
+app_name=$(basename "$apk" .apk)
+app_title=$(format_app_title "$app_name")
+get_input_apk input_apk "$apk"
+
+if [[ -z $results_dir_name ]]; then
+    error "Default settings have not been provided."
+    exit 2
+fi
+
+if [[ -z $task ]]; then
+    warn "No task name provided, using 'stoat'."
+    task="stoat"
+fi
+
+results="$output/$results_dir_name/$app_name/$task/test_$test"
+
+launch_emulator "api23_0" "$results/emulator_$test.log"
+
+task_log="$results/${task}_$test.log"
+info "Running Stoat test $test on $app_title."
+ruby bin/run_stoat_testing.rb  --project_type apk --app_dir "${input_apk:?}" \
+    --apk_path "${input_apk:?}" --event_delay 500 --avd_name api23_0 \
+    --avd_sdk_version android-23 2>&1 | tee "$task_log" | prepend
+code=${PIPESTATUS[0]}
+
+if [[ $code -ne 0 ]]; then
+    echo "[ERROR] ($script:${LINENO}) - Stoat on $app_title failed (Err: $code)."
+    exit $((code))
+fi
+
+base_output=$(cut -f 1 -d '.' <<< "${input_apk:?}")
+info "Deleting APKTool output."
+rm -r  "$base_output"
+code=$?
+
+if [[ $code -ne 0 ]]; then
+    error "Failed to remove APKTool output (Err $code)."
+fi
+
+info "Moving Stoat outputs to $results."
+mv "$base_output-output" "$results/output_$test" 2>&1 | prepend
+code=${PIPESTATUS[0]}
+
+if [[ $code -ne 0 ]]; then
+    error "Failed to move Stoat output to the output directory (Err $code)."
+    exit $((code))
+fi
+
+info "Task completed successfully."

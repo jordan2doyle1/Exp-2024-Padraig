@@ -1,0 +1,116 @@
+#!/bin/bash
+#
+# Author: Jordan Doyle.
+#
+
+# shellcheck source=../log.sh
+source log.sh
+# shellcheck source=../setting.sh
+source setting.sh
+# shellcheck source=../acv.sh
+source acv.sh
+# shellcheck source=../util.sh
+source util.sh
+
+function update {
+    code=$?
+    log_execution_time
+    exit $((code))
+}
+
+trap update EXIT
+
+usage="Usage: $(basename "$0") [-h] -t INT -o DIR -a FILE"
+while getopts ':ht:o:a:' option; do
+    case "$option" in
+        h) 
+            info "$usage" 
+            exit
+            ;;
+        t)
+            test="$OPTARG"
+            ;;
+        o)
+            output="$OPTARG"
+            ;;
+        a)
+            apk="$OPTARG"
+            ;;
+        :) 
+            error "Missing argument for -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+        ?)
+            error "Illegal option: -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ ! "$output" ]] || [[ ! "$apk" ]] || [[ ! "$test" ]]; then
+    error "Arguments -o -a and -t must be provided."
+    error "$usage"
+    exit 1
+fi
+
+check_output_exists
+output=$(readlink -f "$output")
+
+check_apk_exists
+app_name=$(basename "$apk" .apk)
+app_title=$(format_app_title "$app_name")
+get_input_apk input_apk "$apk"
+
+if [[ -z $results_dir_name ]]; then
+    error "Default settings have not been provided."
+    exit 2
+fi
+
+check_acv_installation
+
+if [[ -z $task ]]; then
+    warn "No task name provided, using 's-smog'."
+    task="s-smog"
+fi
+
+results="$output/$results_dir_name/$app_name/$task/test_$test"
+
+launch_emulator "api28_0" "$results/emulator_$test.log"
+
+task_log="$results/${task}_$test.log"
+info "Running S-SMOG test $test on $app_title."
+python -u main.py "${input_apk:?}" 2>&1 | tee "$task_log" | prepend
+code=${PIPESTATUS[0]}
+
+if [[ $code -ne 0 ]]; then
+    error "S-SMOG test $test on $app_title failed (Err: $code)."
+    exit $((code))
+fi
+
+info "Moving fitness values to $results."
+mv "fitness_values" "$results/fitness_values_$test" 2>&1 | prepend
+code=${PIPESTATUS[0]}
+
+if [[ $code -ne 0 ]]; then
+    error "Failed to move fitness values to the output directory (Err $code)."
+fi
+
+info "Moving population scripts to $results."
+mv "population-scripts" "$results/population_scripts_$test" 2>&1 | prepend
+code=${PIPESTATUS[0]}
+
+if [[ $code -ne 0 ]]; then
+    error "Failed to move test scripts to the output directory (Err $code)."
+fi
+
+info "Moving SMOG log file to $results."
+mv "log.log" "$results/log_$test.log" 2>&1 | prepend
+code=${PIPESTATUS[0]}
+
+if [[ $code -ne 0 ]]; then
+    error "Failed to move SMOG log file to the output directory (Err $code)."
+fi
+
+info "Task completed successfully."

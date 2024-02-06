@@ -1,0 +1,62 @@
+#!/bin/bash
+#
+# Author: Jordan Doyle.
+#
+
+source log.sh
+
+usage="Usage: $(basename "$0") [-h] -c FILE"
+while getopts ':hc:' option; do
+    case "$option" in
+        h) 
+            info "$usage" 
+            exit
+            ;;
+        c) 
+            config="$OPTARG"
+            ;;
+        :) 
+            error "Missing argument for -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+        ?)
+            error "Illegal option: -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ ! "$config" ]]; then
+    error "Argument -c must be provided."
+    error "$usage"
+    exit 1
+fi
+
+if [[ ! -f "$config" ]]; then
+    error "Emulator config.ini file ($config) does not exist."
+    exit 2
+fi 
+
+# Remove main keys by setting hw.mainkeys to yes.
+# Setting hw.keyboard to yes should disbale virtual keyboard (it doesn't !)
+setting_keys=("hw.mainkeys" "hw.keyboard")
+setting_values=("yes" "yes")
+
+for index in "${!setting_keys[@]}"; do
+    setting="${setting_keys[$index]}=${setting_values[$index]}"
+    if grep -q "$setting" "$config"; then
+        info "Config contains the correct value for '${setting_keys[$index]}'."
+    else
+        if grep -q "${setting_keys[$index]}" "$config"; then
+            info "Updating value for setting '${setting_keys[$index]}'."
+            sed -i "s/${setting_keys[$index]}=\(yes\|no\)/$setting/gi" "$config"
+        else
+            info "Adding value for setting '${setting_keys[$index]}'."
+            echo "$setting" >> "$config"
+        fi
+    fi
+done
+
+info "Finished updating emulator config."

@@ -1,0 +1,106 @@
+#!/bin/bash
+#
+# Author: Jordan Doyle.
+#
+
+# shellcheck source=../log.sh
+source log.sh
+# shellcheck source=../setting.sh
+source setting.sh
+# shellcheck source=../util.sh
+source util.sh
+
+# shellcheck disable=SC2317  # Ignore unreachable commands warning
+function exit_cleanup() {
+    code=$?
+    [[ -d "$target" ]] && rm -r "$target"
+    log_execution_time
+    exit $((code))
+}
+
+target="target"
+trap exit_cleanup EXIT
+
+usage="Usage: $(basename "$0") [-h] -o DIR -a FILE"
+while getopts ':ho:a:' option; do
+    case "$option" in
+        h) 
+            info "$usage" 
+            exit
+            ;;
+        o)
+            output="$OPTARG"
+            ;;
+        a)
+            apk="$OPTARG"
+            ;;
+        :) 
+            error "Missing argument for -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+        ?)
+            error "Illegal option: -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ ! "$output" ]] || [[ ! "$apk" ]]; then
+    error "Arguments -o and -a must be provided."
+    error "$usage"
+    exit 1
+fi
+
+check_output_exists
+output=$(readlink -f "$output")
+
+check_apk_exists
+app_name=$(basename "$apk" .apk)
+app_title=$(format_app_title "$app_name")
+get_input_apk input_apk "$apk"
+
+if [[ -z $task ]]; then
+    warn "No task name provided, using 'model'."
+    task="model"
+fi
+
+jar="model.jar"
+if [[ ! -f $jar ]]; then
+    error "Jar file does not exist."
+    exit 12
+fi
+
+results="$output/$results_dir_name/$app_name/$task"
+
+graph="$output/$results_dir_name/$app_name/androguard/$app_name.gml"
+if [[ ! -f $graph ]]; then
+    error "AndroGuard call graph file does not exist."
+    exit 13
+fi
+
+timeout="1h"
+arguments=(-s -m -cf -a "$input_apk" -i "$graph" -o "$results")
+
+dynamic="$output/$results_dir_name/$app_name/traversal/traversal.log"
+if [[ -f $dynamic ]]; then
+    info "Using dynamic traversal log file."
+    arguments+=(-d "$dynamic")
+fi
+
+info "Modelling $app_title."
+timeout $timeout java -Xms4g -jar "$jar" "${arguments[@]}" 2>&1 | prepend
+code=${PIPESTATUS[0]}
+
+if [[ $code -ne 0 ]]; then
+    if [[ $code -eq 124 ]]; then
+        error "Modelling timed out on $app_title (>$timeout)."
+    else
+        error "Modelling $app_title failed (Err: $code)."
+    fi
+    exit $((code))
+fi
+
+[[ -d $target ]] && mv $target "$results"
+info "Task completed successfully."

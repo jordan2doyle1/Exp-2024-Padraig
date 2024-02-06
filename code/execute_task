@@ -1,0 +1,217 @@
+#!/bin/bash -l
+#
+# Author: Jordan Doyle.
+#
+
+source log.sh
+source setting.sh
+source dock.sh
+source util.sh
+
+# shellcheck disable=SC2317  # Ignore unreachable commands warning.
+function update() {
+    code=$?
+
+    log_execution_time
+
+    exit $((code))
+}
+
+start_count=1
+task_args="-i|a|m|y|k|r|g|e|t|x|v|p"
+usage="Usage: $(basename "$0") [-h] [-b] [-c] -o DIR -s INT -f INT $task_args"
+while getopts ':hbco:s:f:iamykrgetxvp' option; do
+    case "$option" in
+        h)
+            info "$usage"
+            exit
+            ;;
+        b)
+            build=true
+            ;;
+        c)
+            clean=true
+            ;;
+        o)
+            output="$OPTARG"
+            ;;
+        s)
+            start_count="$OPTARG"
+            ;;
+        f)
+            finish_count="$OPTARG"
+            ;;
+        i)
+            task="instrument"
+            ;;
+        a)
+            task="androguard"
+            ;;
+        m)
+            task="model"
+            ;;
+        y)
+            task="monkey"
+            ;;
+        k)
+            task="monkey-click"
+            ;;
+        g)
+            task="s-smog"
+            ;;
+        t)
+            task="stoat"
+            ;;
+        v)
+            task="traversal"
+            ;;
+        p)
+            task="padraig"
+            ;;
+        :)
+            error "Missing argument for -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+        ?)
+            error "Illegal option: -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ ! "$output" ]] || [[ ! "$finish_count" ]] || [[ ! "$task" ]]; then
+    error "Arguments -o, -f and a task option ($task_args) must be provided."
+    error "$usage"
+    exit 1
+fi
+
+trap update EXIT
+
+check_output_exists
+output=$(readlink -f "$output")
+
+re='^[0-9]+$'
+if [[ ! $start_count =~ $re ]] || [[ ! $finish_count =~ $re ]]; then
+    error "Starting test number ($start_count) or finishing test number \
+                ($finish_count) is not a positive integer."
+    exit 2
+fi
+
+case $task in
+    "instrument")
+        repository="instrument"
+        image="jordandoyle100/$repository"
+        container="instrument-container"
+        ;;
+    "androguard")
+        repository="androguard"
+        image="jordandoyle100/$repository"
+        container="androguard-container"
+        ;;
+    "model")
+        repository="model"
+        image="jordandoyle100/$repository"
+        container="model-container"
+        ;;
+    "monkey")
+        repository="monkey"
+        image="jordandoyle100/$repository"
+        container="monkey-container"
+        ;;
+    "monkey-click")
+        repository="monkey-click"
+        image="jordandoyle100/$repository"
+        container="monkey-click-container"
+        ;;
+    "s-smog")
+        repository="s-smog"
+        image="jordandoyle100/$repository"
+        container="s-smog-container-s$start_count-f$finish_count"
+        ;;
+    "stoat")
+        repository="stoat"
+        image="jordandoyle100/$repository"
+        container="stoat-container-s$start_count-f$finish_count"
+        ;;
+    "traversal")
+        repository="traversal"
+        image="jordandoyle100/$repository"
+        container="traversal-container"
+        ;;
+    "padraig")
+        repository="padraig"
+        image="jordandoyle100/$repository"
+        container="padraig-container"
+        ;;
+    *)
+        error "Requested task ($task) is not recognised."
+        exit 3
+        ;;
+esac
+
+if [[ $task == "instrument" ]] || [[ $task == "androguard" ]] || \
+        [[ $task == "model" ]] || [[ $task == "traversal" ]] || \
+        [[ $task == "padraig" ]]; then
+    info "Task is deterministic, setting iterations to 1."
+    finish_count=1
+    multiple_runs=false
+fi
+
+check_docker_install
+
+if [[ -z $build ]] || [[ -z $clean ]] || [[ -z $results_dir_name ]] || \
+        [[ -z $task_log_name ]]; then
+    error "Default settings have not been provided."
+    exit 4
+fi
+
+$build && docker_cleanup $image
+remove_existing_container "$container"
+docker_build $image "$task"
+
+code=0
+break_count=1
+shopt -s nullglob
+for apk in "$output"/apk/*.apk; do
+    app_name=$(basename "$apk" .apk)
+    app_title=$(format_app_title "$app_name")
+    apk=${apk/$output/$docker_output}
+    
+    count=$start_count
+    while [[ $count -le $finish_count ]]; do
+        results="$output/$results_dir_name/$app_name/$task"
+        log="$results/$task_log_name"
+
+        if $multiple_runs; then
+            results="$results/test_$count"
+            log="$results/${task_log_name/.log/_$count.log}"
+        fi
+
+        if ! $clean; then
+            if [[ -f $log ]] && grep -q "Task completed successfully." < "$log"
+            then
+                info "Task '$task' test $count for '$app_title' already done."
+                count=$((count+1))
+                continue
+            fi
+        fi
+
+        info "Starting task '$task' test $count on $app_title."
+        info "Running docker container '$container' with image '$image'."
+        docker run --privileged --rm -it --name "$container" -e apk="$apk" \
+            -e test="$count" -v "$output":"$docker_output" $image
+        code=$?
+
+        if [[ $code -ne 0 ]]; then
+            error "Task '$task' test $count failed on $app_title (Err: $code)."
+            count=$((count+1))
+            continue
+        fi
+
+        count=$((count+1))
+    done
+done
+
+exit $((code))

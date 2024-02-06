@@ -1,0 +1,6 @@
+{
+  "AAPT": "/usr/lib/android-sdk/build-tools/28.0.3/aapt",
+  "ZIPALIGN": "/usr/lib/android-sdk/build-tools/28.0.3/zipalign",
+  "ADB": "/usr/lib/android-sdk/platform-tools/adb",
+  "APKSIGNER": "/usr/lib/android-sdk/build-tools/28.0.3/apksigner"
+}

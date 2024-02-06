@@ -1,0 +1,85 @@
+#!/bin/bash
+#
+# Author: Jordan Doyle
+#
+
+# shellcheck source=../log.sh
+source log.sh
+# shellcheck source=../util.sh
+source util.sh
+
+function cleanup {
+	code=$?
+
+	[[ -f "$temp_file" ]] && rm "$temp_file"
+	temp_file_idsig="temp_file.apk.idsig"
+    [[ -f "$temp_file_idsig" ]] && rm "$temp_file_idsig"
+
+    exit $((code))
+}
+
+temp_file="temp_file.apk"
+trap cleanup EXIT
+
+usage="Usage: $(basename "$0") [-h] -a FILE -k FILE"
+while getopts ':ha:k:' option; do
+    case "$option" in
+        h) 
+            info "$usage" 
+            exit
+            ;;
+        a)
+            apk="$OPTARG"
+            ;;
+        k)
+            keystore="$OPTARG"
+            ;;
+        :) 
+            error "Missing argument for -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+        ?)
+            error "Illegal option: -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ ! "$apk" ]] || [[ ! "$keystore" ]]; then
+    error "Arguments -a and -o must be provided."
+    error "$usage"
+    exit 1
+fi
+
+if [[ ! -d "$ANDROID_HOME" ]]; then
+	error "ANDROID_HOME not set."
+	exit 2
+fi
+
+tool_versions=("$ANDROID_HOME"/build-tools/*/)
+build_tools=$(printf "%s\n" "${tool_versions[@]}" | sort -nr | head -n1)
+if [[ ! -d "$build_tools" ]]; then
+	error "Android build tools directory ($build_tools) does not exist."
+	exit 3
+fi
+
+zip_align="$build_tools/zipalign"
+apk_signer="$build_tools/apksigner"
+if [[ ! -f "$zip_align" ]] || [[ ! -f "$apk_signer" ]]; then 
+	error "zipalign ($zip_align) or apksigner ($apk_signer) cannot be found."
+	exit 4
+fi
+
+check_apk_exists
+
+if [[ ! -f "$keystore" ]]; then
+	error "Keystore file ($keystore) does not exist."
+	exit 5
+fi
+
+$zip_align -f 4 "$apk" "$temp_file"
+$apk_signer sign --ks "$keystore" --ks-pass pass:android "$temp_file"
+cp "$temp_file" "$apk"
+info "The app is signed and located in $apk."

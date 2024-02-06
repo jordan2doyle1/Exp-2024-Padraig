@@ -1,0 +1,80 @@
+#!/bin/bash
+#
+# Author: Jordan Doyle. 
+#
+
+# shellcheck source=../log.sh
+source log.sh
+# shellcheck source=../setting.sh
+source setting.sh
+# shellcheck source=../util.sh
+source util.sh
+
+# shellcheck disable=SC2317  # Ignore unreachable commands warning
+function update() {
+    code=$?
+    log_execution_time
+    exit $((code))
+}
+
+trap update EXIT
+
+usage="Usage: $(basename "$0") [-h] -o DIR -a FILE"
+while getopts ':ho:a:' option; do
+    case "$option" in
+        h) 
+            info "$usage" 
+            exit
+            ;;
+        o)
+            output="$OPTARG"
+            ;;
+        a)
+            apk="$OPTARG"
+            ;;
+        :) 
+            error "Missing argument for -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+        ?)
+            error "Illegal option: -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ ! "$output" ]] || [[ ! "$apk" ]]; then
+    error "Arguments -o and -a must be provided."
+    error "$usage"
+    exit 1
+fi
+
+check_output_exists
+output=$(readlink -f "$output")
+
+check_apk_exists
+app_name=$(basename "$apk" .apk)
+app_title=$(format_app_title "$app_name")
+get_input_apk input_apk "$apk"
+
+if [[ -z $task ]]; then
+    warn "No task name provided, using 'androguard'."
+    task="androguard"
+fi
+
+results="$output/$results_dir_name/$app_name/$task"
+cmd_log="$results/$task.log"
+output_graph="$results/$app_name.gml"
+
+info "Running AndroGuard call graph analysis on $app_title."
+androguard cg -o "$output_graph" "${input_apk:?}" > "$cmd_log" 2>&1
+code=$?
+
+if [[ $code -ne 0 ]]; then
+    error "AndroGuard analysis failed on $app_title (Err: $code)."
+    exit $((code))
+fi
+
+info "Task completed successfully."

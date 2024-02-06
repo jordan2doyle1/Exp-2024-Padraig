@@ -1,0 +1,145 @@
+#!/bin/bash
+#
+# Author: Jordan Doyle.
+#
+
+# shellcheck source=../log.sh
+source log.sh
+# shellcheck source=../setting.sh
+source setting.sh
+# shellcheck source=../acv.sh
+source acv.sh
+# shellcheck source=../util.sh
+source util.sh
+
+function update {
+    code=$?
+    log_execution_time
+    exit $((code))
+}
+
+trap update EXIT
+
+function verify_logcat_logs() {
+    event_log="Events injected: $events"
+    finish_log="// Monkey finished"
+
+    if [[ ! -f "$logcat_log" ]] || [[ ! -f "$monkey_log" ]] || \
+        ! grep -q -e "$event_log" -e "$finish_log" < "$monkey_log"
+    then
+        error "Monkey test $test did not complete $events events on $app_title."
+    fi
+
+    monkey_started=false
+    log_entry="Calling main entry com.android.commands.monkey.Monkey"
+    while read -r line; do
+        if grep -q "$log_entry" <<< "$line"; then
+            monkey_started=true
+            break
+        fi
+
+        if ! $monkey_started && grep -q "Monkey" <<< "$line"; then
+            error "Monkey event found before test $test started on $app_title."
+            break
+        fi
+    done < "$logcat_log"
+}
+
+usage="Usage: $(basename "$0") [-h] [-s] [-e INT] -t INT -o DIR -a FILE"
+while getopts ':hst:e:o:a:' option; do
+    case "$option" in
+        h) 
+            info "$usage" 
+            exit
+            ;;
+        s)
+            seed=false
+            ;;
+        t)
+            test="$OPTARG"
+            ;;
+        e)
+            events="$OPTARG"
+            ;;
+        o)
+            output="$OPTARG"
+            ;;
+        a)
+            apk="$OPTARG"
+            ;;
+        :) 
+            error "Missing argument for -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+        ?)
+            error "Illegal option: -$OPTARG"
+            error "$usage"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ ! "$output" ]] || [[ ! "$apk" ]] || [[ ! "$test" ]]; then
+    error "Arguments -o -a and -t must be provided."
+    error "$usage"
+    exit 1
+fi
+
+check_output_exists
+output=$(readlink -f "$output")
+
+check_apk_exists
+app_name=$(basename "$apk" .apk)
+app_title=$(format_app_title "$app_name")
+get_input_apk input_apk "$apk"
+
+if [[ -z $results_dir_name ]] || [[ -z "$events" ]] || [[ -z $seed ]]; then
+    error "Default settings have not been provided."
+    exit 2
+fi
+
+check_acv_installation
+
+if $seed && [[ "$test" -gt ${#seeds[@]} ]]; then
+    warn "Not enough seed values, running without seeds."
+    seed=false
+fi
+
+if [[ -z $task ]]; then
+    warn "No task name provided, using 'monkey'."
+    task="monkey"
+fi
+
+results="$output/$results_dir_name/$app_name/$task/test_$test"
+
+acv_instrument "${input_apk:?}" "$(dirname "$results")"
+launch_emulator "api28_0" "$results/emulator_$test.log"
+acv_install "$acv_apk"
+grant_app_permissions "$package" "$acv_apk"
+acv_start "$package"
+
+arguments=(-p "$package" -vvv --throttle 500)
+$seed && arguments+=(-s "${seeds[$test-1]}")
+arguments+=("$events")
+
+adb logcat -c
+
+monkey_log="$results/monkey_$test.log"
+info "Starting monkey test $test on $app_title."
+adb shell monkey "${arguments[@]}" 2>&1 | tee "$monkey_log" | prepend
+code=${PIPESTATUS[0]}
+
+if [[ $code -ne 0 ]]; then
+    error "Moneky test $test failed on $app_title."
+fi
+
+logcat_log="$results/logcat_$test.log"
+adb logcat -d > "$logcat_log"
+adb logcat -c
+sed -i '/entry com.android.commands.monkey.Monkey/,$!d' "$logcat_log"
+
+verify_logcat_logs
+acv_stop "$package"
+acv_report "$results" "$test" "$package" "$pickle"
+info "Task completed successfully."
