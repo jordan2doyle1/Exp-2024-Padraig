@@ -4,6 +4,17 @@ PADRAIG (Precise AnDRoid Automated Input Generation) is a model-based framework 
 
 Please note that this repository will be maintained but not regularly.
 
+#### Publication:
+```
+@inproceedings{doyle2024padraig,
+  title={PADRAIG: Precise AnDRoid Automated Input Generation},
+  author={Doyle, Jordan and Laurent, Thomas and Ventresque, Anthony},
+  booktitle={2024 International Conference on Software Quality, Reliability, and Security (QRS)},
+  year={2024},
+  note={Status: accepted and presented at QRS.}
+}
+```
+
 ### Installation
 
 Simply download the artefact [here](https://github.com/jordan2doyle1/QRS-2024-Padraig/archive/cbb772ec017f44db8add539e5621cb7cc151a9ad.zip) and apply the following environment configuration.
